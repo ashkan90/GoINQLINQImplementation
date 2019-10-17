@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 )
 
 type QueryCallback func() (item interface{}, ok bool)
@@ -29,7 +30,7 @@ func From(d interface{}) LINQer {
 			Iterate: func() QueryCallback {
 				index := 0
 
-				return func () (item interface{}, ok bool){
+				return func() (item interface{}, ok bool) {
 					ok = index < len
 
 					if ok {
@@ -41,21 +42,42 @@ func From(d interface{}) LINQer {
 				}
 			},
 		}
+	case reflect.Map:
+		_len := flyReflect.Len()
+
+		return LINQer{
+			Iterate: func() QueryCallback {
+
+				index := 0
+
+				return func() (item interface{}, ok bool) {
+					ok = index < _len
+					mRange := flyReflect.MapRange()
+
+					if ok && mRange.Next() {
+
+						exposureMap := reflect.MakeMapWithSize(flyReflect.Type(), _len)
+						exposureMap.SetMapIndex(mRange.Key(), mRange.Value())
+						item = exposureMap.Interface()
+						index++
+					}
+					return
+				}
+			},
+		}
 	default:
 		return LINQer{}
 	}
 
 }
 
-
 func (l LINQer) Where(s func(interface{}) bool) LINQer {
 	return LINQer{
 		Iterate: func() QueryCallback {
 			next := l.Iterate()
 
-
-			return func() (item interface{}, ok bool){
-				for item, ok = next(); ok ; item, ok = next() {
+			return func() (item interface{}, ok bool) {
+				for item, ok = next(); ok; item, ok = next() {
 					if s(item) {
 						return
 					}
@@ -72,7 +94,7 @@ func (l LINQer) Push(d interface{}) LINQer {
 			next := l.Iterate()
 
 			items := make([]interface{}, 0)
-			for item, ok := next(); ok ; item, ok = next() {
+			for item, ok := next(); ok; item, ok = next() {
 				items = append(items, item)
 			}
 
@@ -107,19 +129,21 @@ func (l LINQer) PutIndex(i uint, d interface{}) LINQer {
 
 			items := make([]interface{}, 0)
 			copyItems := make([]interface{}, 0)
-			for item, ok := next(); ok ; item, ok = next() {
+			for item, ok := next(); ok; item, ok = next() {
 				items = append(items, item)
 				copyItems = append(copyItems, item)
 			}
 
 			var afterPart []interface{}
-			if int(i) > l.Count() { items = append(items, d) } else {
+			if int(i) > l.Count() {
+				items = append(items, d)
+			} else {
 
 				afterPart = items[:i]
 
 				afterPart = append(afterPart, d)
 				afterPart = append(afterPart, copyItems[i:]...)
-				}
+			}
 
 			length := len(afterPart)
 			index := 0
@@ -134,14 +158,6 @@ func (l LINQer) PutIndex(i uint, d interface{}) LINQer {
 	}
 }
 
-func slice(val interface{}, i int) []interface{} {
-	v := reflect.ValueOf(val.([]interface{}))
-
-	n := reflect.New(v.Type()).Elem()
-	n.Set(v)
-	return n.Interface().([]interface{})
-}
-
 func (l LINQer) First() interface{} {
 	item, _ := l.Iterate()()
 	return item
@@ -151,7 +167,7 @@ func (l LINQer) Last() interface{} {
 	next := l.Iterate()
 
 	var last interface{}
-	for item, ok := next(); ok ; item, ok = next() {
+	for item, ok := next(); ok; item, ok = next() {
 		last = item
 	}
 
@@ -161,7 +177,7 @@ func (l LINQer) Last() interface{} {
 func (l LINQer) ForEach(action func(interface{})) {
 	next := l.Iterate()
 
-	for item, ok := next(); ok ; item, ok = next(){
+	for item, ok := next(); ok; item, ok = next() {
 		action(item)
 	}
 }
@@ -170,7 +186,7 @@ func (l LINQer) Count() int {
 	c := 0
 	next := l.Iterate()
 
-	for _, ok := next(); ok ; _, ok = next() {
+	for _, ok := next(); ok; _, ok = next() {
 		c++
 	}
 
@@ -181,15 +197,36 @@ func (l LINQer) Results() []interface{} {
 	res := make([]interface{}, 0)
 	next := l.Iterate()
 
-	for item, ok := next(); ok ; item, ok = next() {
+	for item, ok := next(); ok; item, ok = next() {
 		res = append(res, item)
 	}
 
 	return res
 }
 
+func (l LINQer) Apply(to interface{}) {
+	rf := reflect.NewAt(reflect.TypeOf(to), unsafe.Pointer(&to)).Elem().Interface()
+	fmt.Printf("%T\n", rf)
+	var dest reflect.Value
+	reflect.Copy(dest, reflect.ValueOf(to))
+
+	fmt.Printf("%T\n", dest)
+}
+
+func (l LINQer) AnalyzeWithWhere(d interface{}) LINQer {
+
+	return LINQer{
+		Iterate: func() QueryCallback {
+
+			return func() (item interface{}, ok bool) {
+				return
+			}
+		},
+	}
+}
+
 type Car struct {
-	year int
+	year         int
 	owner, model string
 }
 
@@ -199,11 +236,20 @@ func main() {
 	cars = append(cars, Car{2000, "emirhan", "m3"})
 	cars = append(cars, Car{2006, "emirhan", "e46"})
 
-	From(cars).Where(func(i interface{}) bool {
-		return true
-	}).PutIndex(0, Car{2004, "Ataman", "e30"}).ForEach(func(i interface{}) {
-		fmt.Println(i)
-	})
+	type b map[string]string
+
+	t := b{
+		"name":    "emirhan",
+		"surname": "ataman",
+		"age":     "18",
+	}
+
+	From(t).Where(func(i interface{}) bool {
+		return i.(b)["name"] == "emirhan"
+	}).
+		ForEach(func(i interface{}) {
+			fmt.Println(i.(b)["name"])
+		})
 
 }
 
